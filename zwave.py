@@ -1,19 +1,18 @@
 # -*- coding: utf-8 -*-
-import openzwave
-import ConfigParser
+import openzwave, ConfigParser, os, sys
 from plugins.pluginapi import PluginAPI
 from twisted.python import log
 from twisted.internet import reactor
-from utils.generic import get_configurationpath
-import win32service
-import win32serviceutil
-import win32event
-import win32evtlogutil
-import os, sys
 from openzwave import PyManager
 from collections import namedtuple
 import time, json, datetime
 from louie import dispatcher, All
+
+if os.name == 'nt':
+    import win32service
+    import win32serviceutil
+    import win32event
+    import win32evtlogutil
 
 NamedPair = namedtuple('NamedPair', ['id', 'name'])
 NodeInfo = namedtuple('NodeInfo', ['generic','basic','specific','security','version'])
@@ -169,7 +168,10 @@ class ZWaveWrapper():
         config_path = get_configurationpath()
         
         config = ConfigParser.RawConfigParser()
-        config.read(os.path.join(config_path, 'zwave', 'zwave.conf'))
+        if os.name == "nt":
+            config.read(os.path.join(config_path, 'zwave', 'zwave.conf'))
+        else:
+            config.read('zwave.conf')
         
         # Get broker information (RabbitMQ)
         self.broker_host = config.get("broker", "host")
@@ -554,61 +556,66 @@ class ZWaveWrapper():
                 return k
         return None
 
-class ZwaveService(win32serviceutil.ServiceFramework):
-    _svc_name_ = "hazwave"
-    _svc_display_name_ = "HouseAgent - Z-wave Service"
+if os.name == "nt":    
     
-    def __init__(self,args):
-        # Fix the current working directory -- this gets initialized incorrectly
-        # for some reason when run as an NT service.
-        win32serviceutil.ServiceFramework.__init__(self,args)
-        self.hWaitStop=win32event.CreateEvent(None, 0, 0, None)
-        self.isAlive=True
-
-    def SvcStop(self):
-
-        # tell Service Manager we are trying to stop (required)
-        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-
-        reactor.stop()
-        win32event.SetEvent(self.hWaitStop)
-        # set the event to call
-        #win32event.SetEvent(self.hWaitStop)
-
-        self.isAlive=False
-
-    def SvcDoRun(self):
-        import servicemanager
+    class ZwaveService(win32serviceutil.ServiceFramework):
+        '''
+        This class is a Windows Service handler, it's common to run
+        long running tasks in the background on a Windows system, as such we
+        use Windows services for HouseAgent.
+        '''        
+        _svc_name_ = "hazwave"
+        _svc_display_name_ = "HouseAgent - Z-wave Service"
         
-        currentDir = os.path.dirname(sys.executable)
-        os.chdir(currentDir)
-
-        # Write a 'started' event to the event log... (not required)
-        #
-        win32evtlogutil.ReportEvent(self._svc_name_,servicemanager.PYS_SERVICE_STARTED,0,
-        servicemanager.EVENTLOG_INFORMATION_TYPE,(self._svc_name_, ''))
-
-        # methode 1: wait for beeing stopped ...
-        # win32event.WaitForSingleObject(self.hWaitStop,win32event.INFINITE)
-
-        # methode 2: wait for beeing stopped ...
-        self.timeout=1000  # In milliseconds (update every second)
-
-        zwave = Zwave()
-       
-        if zwave.start():
-            win32event.WaitForSingleObject(self.hWaitStop, win32event.INFINITE) 
-
-        # and write a 'stopped' event to the event log (not required)
-        #
-        win32evtlogutil.ReportEvent(self._svc_name_,servicemanager.PYS_SERVICE_STOPPED,0,
-                                    servicemanager.EVENTLOG_INFORMATION_TYPE,(self._svc_name_, ''))
-
-        self.ReportServiceStatus(win32service.SERVICE_STOPPED)
-
-        return
+        def __init__(self,args):
+            win32serviceutil.ServiceFramework.__init__(self,args)
+            self.hWaitStop=win32event.CreateEvent(None, 0, 0, None)
+            self.isAlive=True
+    
+        def SvcStop(self):
+            self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+            reactor.stop()
+            win32event.SetEvent(self.hWaitStop)
+            self.isAlive=False
+    
+        def SvcDoRun(self):
+            import servicemanager
+                   
+            win32evtlogutil.ReportEvent(self._svc_name_,servicemanager.PYS_SERVICE_STARTED,0,
+            servicemanager.EVENTLOG_INFORMATION_TYPE,(self._svc_name_, ''))
+    
+            self.timeout=1000  # In milliseconds (update every second)
+            
+            wrapper = ZWaveWrapper(configset='config/')
+            reactor.run(installSignalHandlers=0)
+            if wrapper:
+                win32event.WaitForSingleObject(self.hWaitStop, win32event.INFINITE) 
+    
+            win32evtlogutil.ReportEvent(self._svc_name_,servicemanager.PYS_SERVICE_STOPPED,0,
+                                        servicemanager.EVENTLOG_INFORMATION_TYPE,(self._svc_name_, ''))
+    
+            self.ReportServiceStatus(win32service.SERVICE_STOPPED)
+    
+            return
 
 #if __name__ == '__main__':
-#    win32serviceutil.HandleCommandLine(ZwaveService)
+#    
+#    if os.name == "nt":    
+#        
+#        if len(sys.argv) == 1:
+#            try:
+#    
+#                import servicemanager, winerror
+#                evtsrc_dll = os.path.abspath(servicemanager.__file__)
+#                servicemanager.PrepareToHostSingle(ZwaveService)
+#                servicemanager.Initialize('ZwaveService', evtsrc_dll)
+#                servicemanager.StartServiceCtrlDispatcher()
+#    
+#            except win32service.error, details:
+#                if details[0] == winerror.ERROR_FAILED_SERVICE_CONTROLLER_CONNECT:
+#                    win32serviceutil.usage()
+#        else:    
+#            win32serviceutil.HandleCommandLine(ZwaveService)
+#    else:
 wrapper = ZWaveWrapper(configset='config/')
 reactor.run()

@@ -1,0 +1,9 @@
+<items>
+	<item name="Z-wave" url="#zwave" image="/images/zwave_icon.png">
+		<subitem>
+			<name>Network information</name>
+			<url>/zwave_networkinfo</url>
+			<description>This page displays general information about the nodes in the z-wave network.</description>
+		</subitem>	
+	</item>
+</items>

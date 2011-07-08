@@ -1,0 +1,50 @@
+<%inherit file="/master.html"/>
+<% import datetime %>
+<%def name="head()">
+</%def>
+
+<%def name="content()">
+<div id="output"></div>
+<table cellspacing="0" cellpadding="0" align="center" width="100%" id="devices">
+	<tbody>
+		<tr>
+			<td class="HeadText">Z-wave network information</td>
+		</tr>
+		<tr>
+			<td class="body info">
+				<p>This page displays general information about the nodes in the z-wave network.</p>
+			</td>
+		</tr>
+		<tr>
+			<td class="body">
+				<table class="InfoTable" cellspacing="0" cellpadding="0" border="0" width="60%">
+					<tbody>
+						<tr class="HeadTable">
+							<td nowrap="" width="5%">Node ID</td>
+							<td nowrap="" width="10%">Manufacturer</td>
+							<td nowrap="" width="20%">Product</td>
+							<td nowrap="" width="10%">Product type</td>
+							<td nowrap="" width="10%">Capabilities</td>
+							<td nowrap="" width="15%">Sleeping</td>
+							<td nowrap="" width="15%">Last update</td>
+							<td nowrap="" width="15%">Options</td>
+						</tr>
+						% for node, details in result.iteritems():
+						<tr class="Row">
+							<td>${node}</td>
+							<td>${details["manufacturer"]}</td>
+							<td>${details["product"]}</td>
+							<td>${details["producttype"]}</td>
+							<td>${details["capabilities"]}</td>
+							<td>${details["sleeping"]}</td>
+							<td>${details["lastupdate"]}</td>
+							<td><a href="/zwave_add?node=${node}&pluginguid=${pluginguid}&pluginid=${pluginid}"><img name="Add this device to the database" class="delete" border="0" src="/images/add.png"></a></td>											
+						</tr>
+						% endfor
+					</tbody>
+				</table>
+			</td>
+		</tr>
+	</tbody>
+</table>
+</%def>
