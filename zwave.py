@@ -271,17 +271,26 @@ class ZWaveWrapper():
                 values[self._nodes[node].values[value].value_data["id"]] = valueinfo
                 
             return values
+        
         elif command == "track_values":
             '''
             With this command you can set certain z-wave values to be tracked, and sent to the master node.
             '''
+            from utils.generic import get_configurationpath
+            config_path = get_configurationpath()            
+            
             config = ConfigParser.RawConfigParser()
-            config.read('zwave.conf')
+            if os.name == "nt":
+                config.read(os.path.join(config_path, 'zwave', 'zwave.conf'))
+            else:
+                config.read('zwave.conf')
 
             try:
                 value_list = json.loads(config.get("general", "report_values"))
             except: 
                 value_list = []
+                
+            print value_list
             
             for value in parameters["values"]:
                 if value not in value_list:
@@ -289,10 +298,17 @@ class ZWaveWrapper():
                         
             config.set("general", "report_values", json.dumps(value_list))
 
-            with open('zwave.conf', 'wb') as configfile:
+            with open(os.path.join(config_path, 'zwave', 'zwave.conf'), 'wb') as configfile:
                 config.write(configfile)
                 
-            self._report_values = value_list               
+            self._report_values = value_list
+        
+            # Report values right now
+            for node in self._nodes:
+                for value in self._nodes[node].values:
+                    if str(self._nodes[node].values[value].value_data["id"]) in parameters["values"]:
+                        values = {self._nodes[node].values[value].value_data["label"] : self._nodes[node].values[value].value_data["value"]}
+                        self.pluginapi.value_update(self._nodes[node].values[value].value_data["nodeId"], values)                
 
         elif command == "power_on":
             node = parameters["address"]
