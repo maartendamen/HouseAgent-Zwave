@@ -23,21 +23,19 @@
 							<td nowrap="" width="5%">Node ID</td>
 							<td nowrap="" width="10%">Manufacturer</td>
 							<td nowrap="" width="20%">Product</td>
-							<td nowrap="" width="10%">Product type</td>
-							<td nowrap="" width="10%">Capabilities</td>
-							<td nowrap="" width="15%">Sleeping</td>
+							<td nowrap="" width="10%">Sleeping</td>
+							<td nowrap="" width="10%">Added to database</td>
 							<td nowrap="" width="15%">Last update</td>
 							<td nowrap="" width="15%">Options</td>
 						</tr>
 						% for node, details in result.iteritems():
 						<tr class="Row">
 							<td>${node}</td>
-							<td>${details["manufacturer"]}</td>
+							<td>${details['manufacturer']}</td>
 							<td>${details["product"]}</td>
-							<td>${details["producttype"]}</td>
-							<td>${details["capabilities"]}</td>
-							<td>${details["sleeping"]}</td>
-							<td>${details["lastupdate"]}</td>
+							<td>${details['sleeping']}</td>
+							<td>${details['in_database']}</td>
+							<td>${details['lastupdate']}</td>
 							<td><a href="/zwave_add?node=${node}&pluginguid=${pluginguid}&pluginid=${pluginid}"><img name="Add this device to the database" class="delete" border="0" src="/images/add.png"></a></td>											
 						</tr>
 						% endfor

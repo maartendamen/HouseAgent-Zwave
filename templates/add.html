@@ -18,12 +18,34 @@ $(document).ready(function()
         return myJSONText;
     }
     
+    $("#device_type").change(function() {
+        // Deselect all checkboxes
+        $("#values tr").each(function(){
+            $(this).find('td:first').children(':first-child').attr('checked', false);
+        });
+    
+        var device_type = $("#device_type option:selected").val();
+        if (device_type == "switch_binary") {
+            // Loop through values table
+	        $("#values tr td").each(function(){
+			   if ($(this).html() == "COMMAND_CLASS_SWITCH_BINARY") {
+			     $(this).closest('tr').find('td:first').children(':first-child').attr('checked', true);
+			   }
+			});
+        } else if (device_type == "thermostat") {
+            $("#values tr td").each(function(){
+               if ($(this).html() == "COMMAND_CLASS_THERMOSTAT_SETPOINT") {
+                 $(this).closest('tr').find('td:first').children(':first-child').attr('checked', true);
+               }
+            });        
+        }
+    });
+    
     $('#adddevice_button').click(function() {
         var valueids = []
     
         $('input:checked').each(function() {          
-            valueids.push($(this).attr('id'));
-            console.log(valueids);                     
+            valueids.push($(this).attr('id'));                  
         });
         
         location_id            = $("#locations").val();
@@ -36,13 +58,25 @@ $(document).ready(function()
                        'location': location_id,
                        'name': device_name};
 
-        console.log(device_data);
-
         $.ajax({
           type: 'POST',
           url: '/zwave_added',
-          data: json_encode(device_data)
-        });
+          data: json_encode(device_data),
+                success:    function(data) {
+                                // Show operation was successful
+                                $("#message").html('<img height="16" width="16" align="left" class="message" src="/images/ok.png">Device \'' + device_name + '\' succesfully added to the database!');
+                                $('#message').show('slow', function() {
+                                });
+
+                                // Reset form and clean out checkboxes
+                                $('#device_add')[0].reset();
+                                
+						        $("#values tr").each(function(){
+						            $(this).find('td:first').children(':first-child').attr('checked', false);
+						        });                                
+                            }
+        });        
+        
     });     
 });
 </script>
@@ -57,12 +91,12 @@ $(document).ready(function()
 		</tr>
 		<tr>
 			<td class="body info">
-				<p>This page allows you to add this device to the database. Please select the values you would like to log..</p>
+				<p>This page allows you to add this device to the database.</p>
 			</td>
 		</tr>
         <tr>
             <td class="body">
-                <form name="device_add">
+                <form id="device_add">
                     <table class="InfoTable" cellspacing="0" cellpadding="2" border="0" width="40%">
                         <tbody>
                             <tr>
@@ -90,6 +124,19 @@ $(document).ready(function()
                                         % endfor
                                     </select>       
                                 </td>
+                            </tr>   
+                            <tr>
+                                <td class="Label">
+                                    <span class="requiredfield">*</span>
+                                    Device type: 
+                                </td>
+                                <td>
+                                    <select id="device_type">
+                                        <option value="default" selected>Please select a device type...</option>
+                                        <option value="switch_binary">Switch</option>
+                                        <option value="thermostat">Thermostat</option>
+                                    </select>       
+                                </td>
                             </tr>                               
                         </tbody>                           
                     </table>
@@ -97,8 +144,12 @@ $(document).ready(function()
             </td>
         </tr>
         <tr>
-            <td class="body">
-                <table class="InfoTable" cellspacing="0" cellpadding="0" border="0" width="40%">
+            <td class="body" style="font: 11px Tahoma,Verdana,Helvetica,sans-serif;">
+                Note: HouseAgent will automatically select the appropriate values based upon the device type for you.<br>
+                However, you still have the flexibility to select any other value of interest.<br>
+                These values will then be automatically updated and tracked in the devices overview.
+                <br><br>
+                <table id="values" class="InfoTable" cellspacing="0" cellpadding="0" border="0" width="40%">
                     <tbody>
                         <tr class="HeadTable">
                             <td nowrap="" width="5%"></td>
@@ -117,6 +168,7 @@ $(document).ready(function()
                     </tbody>
                 </table>
                 <br>
+                <div id="message" class="message"></div>
                 <table class="PanelPlain" cellspacing="0" cellpadding="2" border="0" width="100%">
                     <tbody>
                         <tr>
