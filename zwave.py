@@ -1,10 +1,12 @@
-#!/usr/bin/env python
+#!/usr/bin/env python 
 # -- coding: utf-8 --
 import openzwave, time, json
+import datetime
+import os
 import ConfigParser
 from twisted.internet import reactor, defer
-from houseagent.plugins.pluginapi import PluginAPI
-import datetime
+from houseagent.plugins import pluginapi
+from houseagent import config_path
 
 class ZwaveNode(object):
     '''
@@ -25,13 +27,16 @@ class ZwaveNode(object):
         self.values = []
     
     def add_value(self, value):
+        '''
+        Adds a value to this node
+        @param value: the value to add to the node
+        '''
         self.values.append(value)
         
     def __str__(self):
         return 'home_id: [{0}]  node_id: [{1}]  manufacturer: [{2}] product: [{3}]'.format(self.home_id, 
                                                                                            self.node_id, 
-                                                                                           self.manufacturer,
-                                                                                           self.product)
+                                                                                           self.manufacturer,                                                                                  self.product)
                
 class ZwaveNodeValue(object):
     '''
@@ -65,7 +70,7 @@ class ZwaveWrapper(object):
         
         self.get_configurationparameters()
         options = openzwave.PyOptions()
-        options.create('config/', '' , '--logging false')
+        options.create('config/', '' , '') #--logging false
         options.lock()
         
         self.manager = openzwave.PyManager()
@@ -78,7 +83,7 @@ class ZwaveWrapper(object):
                      'custom': self.cb_custom,
                      'thermostat_setpoint': self.cb_thermostat}
         
-        self.pluginapi = PluginAPI(plugin_id=self.id, plugin_type=self.PLUGIN_TYPE,
+        self.pluginapi = pluginapi.PluginAPI(plugin_id=self.id, plugin_type=self.PLUGIN_TYPE,
                                    broker_ip=self.broker_host, broker_port=self.broker_port,
                                    username=self.broker_user, password=self.broker_pass, vhost=self.broker_vhost,
                                    **callbacks)
@@ -88,8 +93,14 @@ class ZwaveWrapper(object):
         This function parses configuration parameters from the zwave.conf file.
         Fallback values are assigned in case the configuration file or parameter is not found.
         '''
+        config_file = os.path.join(config_path, 'zwave', 'zwave.conf')
+        
         config = ConfigParser.RawConfigParser()
-        config.read('zwave.conf')
+        if os.path.exists(config_file):
+            config.read(config_file)
+        else:
+            config.read('zwave.conf')
+        
         self.broker_host = config.get('broker', 'host')
         self.broker_port = config.getint('broker', 'port')
         self.broker_user = config.get('broker', 'username')
@@ -336,7 +347,25 @@ class ZwaveWrapper(object):
             node.manufacturer = self.manager.getNodeManufacturerName(node.home_id, node.node_id)
             node.product = self.manager.getNodeProductName(node.home_id, node.node_id)
             node.sleeping = self.manager.isNodeListeningDevice(node.home_id, node.node_id)
+            
+        self.manager.writeConfig(self.home_id)
+        
+class ZwaveService(pluginapi.WindowsService):
+    '''
+    This class provides a Windows Service interface for the z-wave plugin.
+    '''
+    _svc_name_ = "hazwave"
+    _svc_display_name_ = "HouseAgent - Zwave Service"
+    
+    def start(self):
+        '''
+        Start the Zwave interface.
+        '''
+        ZwaveWrapper()
         
 if __name__ == '__main__':
-    ZwaveWrapper()
-    reactor.run()
+    if os.name == 'nt':
+        pluginapi.handle_windowsservice(ZwaveService) # We want to start as a Windows service on Windows.
+    else:
+        ZwaveWrapper()
+        reactor.run()
