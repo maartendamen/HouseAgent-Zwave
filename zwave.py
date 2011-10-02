@@ -23,7 +23,7 @@ class ZwaveNode(object):
         self.last_update = None
         self.manufacturer = None
         self.product = None
-        self.sleeping = True
+        self.listening = True
         self.values = []
     
     def add_value(self, value):
@@ -167,7 +167,7 @@ class ZwaveWrapper(object):
                 nodeinfo = {"manufacturer": node.manufacturer,
                             "product": node.product,
                             "lastupdate": datetime.datetime.fromtimestamp(node.last_update).strftime("%d-%m-%Y %H:%M:%S"),
-                            'sleeping': node.sleeping}
+                            'listening': node.listening}
             
                 nodes[node.node_id] = nodeinfo
             
@@ -346,22 +346,23 @@ class ZwaveWrapper(object):
             node.last_update = time.time()
             node.manufacturer = self.manager.getNodeManufacturerName(node.home_id, node.node_id)
             node.product = self.manager.getNodeProductName(node.home_id, node.node_id)
-            node.sleeping = self.manager.isNodeListeningDevice(node.home_id, node.node_id)
+            node.listening = self.manager.isNodeListeningDevice(node.home_id, node.node_id)
             
         self.manager.writeConfig(self.home_id)
         
-class ZwaveService(pluginapi.WindowsService):
-    '''
-    This class provides a Windows Service interface for the z-wave plugin.
-    '''
-    _svc_name_ = "hazwave"
-    _svc_display_name_ = "HouseAgent - Zwave Service"
-    
-    def start(self):
+if os.name == 'nt':        
+    class ZwaveService(pluginapi.WindowsService):
         '''
-        Start the Zwave interface.
+        This class provides a Windows Service interface for the z-wave plugin.
         '''
-        ZwaveWrapper()
+        _svc_name_ = "hazwave"
+        _svc_display_name_ = "HouseAgent - Zwave Service"
+        
+        def start(self):
+            '''
+            Start the Zwave interface.
+            '''
+            ZwaveWrapper()
         
 if __name__ == '__main__':
     if os.name == 'nt':
