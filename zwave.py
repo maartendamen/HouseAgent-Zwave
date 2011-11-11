@@ -83,10 +83,7 @@ class ZwaveWrapper(object):
                      'custom': self.cb_custom,
                      'thermostat_setpoint': self.cb_thermostat}
         
-        self.pluginapi = pluginapi.PluginAPI(plugin_id=self.id, plugin_type=self.PLUGIN_TYPE,
-                                   broker_ip=self.broker_host, broker_port=self.broker_port,
-                                   username=self.broker_user, password=self.broker_pass, vhost=self.broker_vhost,
-                                   **callbacks)
+        self.pluginapi = pluginapi.PluginAPI(self.id, self.PLUGIN_TYPE, **callbacks)
         
     def get_configurationparameters(self):
         '''
@@ -349,6 +346,7 @@ class ZwaveWrapper(object):
             node.listening = self.manager.isNodeListeningDevice(node.home_id, node.node_id)
             
         self.manager.writeConfig(self.home_id)
+        self.pluginapi.ready()
         
 if os.name == 'nt':        
     class ZwaveService(pluginapi.WindowsService):
