@@ -10,6 +10,9 @@ def init_pages(web, coordinator, db):
     web.putChild("zwave_add", Zwave_add(coordinator, db))
     web.putChild("zwave_networkinfo", Zwave_networkinfo(coordinator, db))
     web.putChild("zwave_added", Zwave_added(coordinator, db))
+    web.putChild("zwave_values", Zwave_values(coordinator))
+    web.putChild('zwave_values_view', Zwave_values_view())
+    web.putChild('zwave_track_value', Zwave_track_value(coordinator, db))
 
 """
 Z-wave pages start here
@@ -28,7 +31,7 @@ class Zwave_add(Resource):
         lookup = TemplateLookup(directories=['houseagent/templates/'])
         template = Template(filename='houseagent/plugins/zwave/templates/add.html', lookup=lookup)
         
-        self.request.write(str(template.render(result=result[1], locations=result[0], node=self.node, pluginid=self.pluginid, pluginguid=self.pluginguid)))
+        self.request.write(str(template.render(locations=result, node=self.node, pluginid=self.pluginid, pluginguid=self.pluginguid)))
         self.request.finish()
     
     def render_GET(self, request):
@@ -38,11 +41,62 @@ class Zwave_add(Resource):
         self.pluginguid = request.args["pluginguid"][0]
         self.pluginid = request.args["pluginid"][0]
       
+        self.db.query_locations().addCallback(self.result)
+        
+        return NOT_DONE_YET
+    
+class Zwave_values(Resource):
+    
+    def __init__(self, coordinator):
+        Resource.__init__(self)
+        self.coordinator = coordinator
+        
+    def result(self, result):
+        
+        self.request.write(json.dumps(result))
+        self.request.finish()
+        
+    def render_GET(self, request):
+        
+        self.request = request
+        self.node = request.args["node"][0]
+        self.pluginguid = request.args["pluginguid"][0]
+        
+        self.coordinator.send_custom(self.pluginguid, "get_nodevalues", {'node': self.node}).addCallback(self.result)
+        
+        return NOT_DONE_YET
+    
+class Zwave_values_view(Resource):
+        
+    def render_GET(self, request):
+        self.node = request.args["node"][0]
+        self.pluginguid = request.args["pluginguid"][0]
+        self.deviceid = request.args["deviceid"][0]
+        
+        lookup = TemplateLookup(directories=['houseagent/templates/'])
+        template = Template(filename='houseagent/plugins/zwave/templates/values.html', lookup=lookup)
+        return str(template.render(node=self.node, pluginguid=self.pluginguid, deviceid=self.deviceid))
+    
+class Zwave_track_value(Resource):
+    
+    def __init__(self, coordinator, db):
+        Resource.__init__(self)
+        self.db = db
+        self.coordinator = coordinator
+    
+    def result(self, result):
+        self.request.write("done!")
+        self.request.finish()
+    
+    def render_POST(self, request):
+        self.pluginguid = request.args["pluginguid"][0]
+        self.value_id = request.args['value_id'][0]
+        self.label = request.args["label"][0]
+        self.deviceid = request.args["deviceid"][0]
+        
         deferlist = []
-        deferlist.append(self.db.query_locations())
-        deferlist.append(self.coordinator.send_custom(self.pluginguid, "get_nodevalues", {'node': self.node}))
-        d = defer.gatherResults(deferlist)
-        d.addCallback(self.result)
+        deferlist.append(self.coordinator.send_custom(self.pluginguid, "track_value", { 'value_id': self.value_id }))
+        deferlist.append(self.db.add_value_with_label(self.value_id, self.label, self.deviceid))
         
         return NOT_DONE_YET
     
@@ -64,7 +118,9 @@ class Zwave_networkinfo(Resource):
             result[node]['in_database'] = 'No'
             for device in devices:
                 if node == device[2]:
+                    result[node]['deviceid'] = device[0]
                     result[node]['in_database'] = 'Yes'
+                    
         
         lookup = TemplateLookup(directories=['houseagent/templates/'])
         template = Template(filename='houseagent/plugins/zwave/templates/networkinfo.html', lookup=lookup)
@@ -99,7 +155,7 @@ class Zwave_added(Resource):
         self.db = db
         
     def device_added(self, result):       
-        self.request.write(str("done!")) 
+        self.request.write(str("ok")) 
         self.request.finish()             
     
     def render_POST(self, request):
@@ -107,6 +163,5 @@ class Zwave_added(Resource):
         data = json.loads(request.content.read())
 
         self.db.save_device(data['name'], data['nodeid'], data['pluginid'], data['location']).addCallback(self.device_added)
-        self.coordinator.send_custom(data['pluginguid'], "track_values", {'node': data['nodeid'], 'values': data['valueids']})
-        
+
         return NOT_DONE_YET

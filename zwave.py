@@ -1,12 +1,49 @@
 #!/usr/bin/env python 
 # -- coding: utf-8 --
-import openzwave, time, json
-import datetime
-import os
-import ConfigParser
-from twisted.internet import reactor, defer
+
+# For development purposes, add the core houseagent codebase also.
+import sys
+sys.path.append("../HouseAgent")
+
+from houseagent import config_to_location
 from houseagent.plugins import pluginapi
-from houseagent import config_path
+from houseagent.utils.error import ConfigFileNotFound
+from threading import Event, Thread
+from twisted.internet import reactor, defer
+import ConfigParser
+import datetime
+import openzwave
+import time
+import json
+import os
+
+class RepeatTimer(Thread):
+    """This class provides functionality to call a function at regular 
+    intervals or a specified number of iterations.  The timer can be cancelled
+    at any time."""
+    
+    def __init__(self, interval, function, iterations=0, args=[], kwargs={}):
+        Thread.__init__(self)
+        self.interval = interval
+        self.function = function
+        self.iterations = iterations
+        self.args = args
+        self.kwargs = kwargs
+        self.finished = Event()
+        self.daemon = True
+ 
+    def run(self):
+        count = 0
+        while not self.finished.is_set() and (self.iterations <= 0 
+                                              or count < self.iterations):
+            self.finished.wait(self.interval)
+            if not self.finished.is_set():
+                self.function(*self.args, **self.kwargs)
+                count += 1
+ 
+    def cancel(self):
+        self.finished.set()
+
 
 class ZwaveNode(object):
     '''
@@ -32,6 +69,51 @@ class ZwaveNode(object):
         @param value: the value to add to the node
         '''
         self.values.append(value)
+        self.fix_labels()
+        
+    def fix_labels(self):
+        '''
+        Makes sure this node has no duplicate value labels
+        '''
+        labels = []
+        duplicates = []
+        for value in self.values:
+            if labels.count(value.value_data["label"]) == 0:
+                labels.append(value.value_data["label"])
+            elif duplicates.count(value.value_data["label"]) == 0:
+                duplicates.append(value.value_data["label"])
+
+        for label in duplicates:
+            
+            for value in self.values:
+                if value.value_data["label"] == label:
+                    instance = value.value_data["instance"]
+                    index = value.value_data["index"]
+                    cclass = value.value_data["commandClass"]
+                    break
+            
+            instanceDifferent = False
+            indexDifferent = False
+            cclassDifferent = False
+            
+            for value in self.values:
+                if value.value_data["label"] == label:
+                    if instance != value.value_data["instance"]:
+                        instanceDifferent = True
+                    if index != value.value_data["index"]:
+                        indexDifferent = True
+                    if cclass != value.value_data["commandClass"]:
+                        cclassDifferent = True
+            
+            for value in self.values:
+                if value.value_data["label"] == label:
+                    value.label = value.value_data["label"] + " "
+                    if instanceDifferent:
+                        value.label += "#" + str(value.value_data["instance"])
+                    if indexDifferent:
+                        value.label += "/" + str(value.value_data["index"])
+                    if cclassDifferent:
+                        value.label += "@" + str(value.value_data["commandClass"]).replace("COMMAND_CLASS_", "")        
         
     def __str__(self):
         return 'home_id: [{0}]  node_id: [{1}]  manufacturer: [{2}] product: [{3}]'.format(self.home_id, 
@@ -52,6 +134,10 @@ class ZwaveNodeValue(object):
         self.node = node
         self.id = id
         self.value_data = value_data
+        self.label = self.value_data["label"]
+
+    def __str__(self):
+        return 'node: {0} label: {1} value_id: {2} value_data: {3}'.format(self.node, self.label, self.id, self.value_data)
 
 class ZwaveWrapper(object):
     '''
@@ -65,71 +151,119 @@ class ZwaveWrapper(object):
         '''
         This function initializes the Zwave module.
         '''
+        
         self.nodes = []
         self.home_id = None
         
         self.get_configurationparameters()
+        
+        self.log = pluginapi.Logging("Zwave")
+        self.log.set_level(self.loglevel)
+
         options = openzwave.PyOptions()
-        options.create('config/', '' , '') #--logging false
+
+        options.create(self.ozw_config_data, '' , 
+                       '--logging %s' % self.ozw_logging) 
         options.lock()
         
         self.manager = openzwave.PyManager()
         self.manager.create()
         self.manager.addWatcher(self.ozw_callback)
-        self.manager.addDriver(self.interface)
+        self.manager.addDriver(self.ozw_interface)
         
         callbacks = {'poweron': self.cb_poweron,
                      'poweroff': self.cb_poweroff,
                      'custom': self.cb_custom,
                      'thermostat_setpoint': self.cb_thermostat}
         
-        self.pluginapi = pluginapi.PluginAPI(self.id, self.PLUGIN_TYPE, **callbacks)
+        # A timer that will call the method 'refresh_nodes' every 
+        # ozw_poll_interval seconds.
+        self.poll_timer = RepeatTimer(self.ozw_poll_interval, self.refreshNodes)
+        
+        self.pluginapi = pluginapi.PluginAPI(self.id, self.PLUGIN_TYPE, broker_host='192.168.1.131',
+                                             **callbacks)
+        
+        print self.pluginapi
+        
+    def refreshNodes(self):
+        self.log.debug("refresing nodes")
+        for node in range(2, len(self.nodes) + 1):
+            self.log.debug("refreshing node %d" % node)
+            self.manager.requestNodeState(self.home_id, node)
         
     def get_configurationparameters(self):
         '''
         This function parses configuration parameters from the zwave.conf file.
-        Fallback values are assigned in case the configuration file or parameter is not found.
+        Fallback values are assigned in case the configuration file or parameter 
+        is not found.
         '''
-        config_file = os.path.join(config_path, 'zwave', 'zwave.conf')
         
         config = ConfigParser.RawConfigParser()
-        if os.path.exists(config_file):
-            config.read(config_file)
-        else:
-            config.read('zwave.conf')
+
+        # Try and load the plugin config file from the plugin directory under 
+        # HouseAgent config directory.
+        self.config_file = config_to_location('zwave.conf')
+        if not os.path.exists(self.config_file):
+            # Maybe we are running development, just load the config file in 
+            # current working directory.
+            self.config_file = os.path.join(os.getcwd(), 'zwave.conf')
+        if not os.path.exists(self.config_file):
+            # With no config, we can't continue
+            raise ConfigFileNotFound("/etc or working directory.")
+        
+        # Read in the configuration from the file.
+        config.read(self.config_file)
+        
+        self.loglevel = config.get('general', 'loglevel')
+        self.id = config.get('general', 'id')
         
         self.broker_host = config.get('broker', 'host')
         self.broker_port = config.getint('broker', 'port')
-        self.broker_user = config.get('broker', 'username')
-        self.broker_pass = config.get('broker', 'password')
-        self.broker_vhost = config.get('broker', 'vhost')
         
-        self.logging = config.get('general', 'loglevel')
-        self.interface = config.get('serial', 'port')
-        self.id = config.get('general', 'id')
+        self.ozw_interface = config.get('openzwave', 'port')
+        self.ozw_config_data = config.get('openzwave', 'config_data')
+        self.ozw_poll_interval = config.getint('openzwave', 'poll_interval')
+        self.ozw_logging = config.get('openzwave', 'logging')
         
-        self.report_values = config._sections['report_values']
-        
+        try:
+            report_values = json.loads(config.get("openzwave", "report_values"))
+        except: 
+            report_values = []
+      
+        self.report_values = report_values
+                
     def cb_poweron(self, node_id):
         '''
-        This function is called when a poweron request has been received from the network.
+        This function is called when a poweron request has been received from 
+        the network.
         @param node_id: the node_id to power on.
         '''
         node_id = int(node_id)
         d = defer.Deferred()
         self.manager.setNodeOn(self.home_id, node_id)
         d.callback('done!')
+        
+        # Need to ensure that we get an up to date status of this node.
+        self.log.debug("Requesting state of node %s" % node_id) 
+        self.manager.requestNodeState(self.home_id, node_id)
+
         return d
         
     def cb_poweroff(self, node_id):
         '''
-        This function is called when a poweroff request has been received from the network.
+        This function is called when a poweroff request has been received from 
+        the network.
         @param node_id: the node_id to power off.
         '''
         node_id = int(node_id)
         d = defer.Deferred()
         self.manager.setNodeOff(self.home_id, node_id)
         d.callback('done!')
+
+        # Need to ensure that we get an up to date status of this node.
+        self.log.debug("Requesting state of node %s" % node_id) 
+        self.manager.requestNodeState(self.home_id, node_id)
+        
         return d
     
     def cb_thermostat(self, node_id, setpoint):
@@ -153,7 +287,8 @@ class ZwaveWrapper(object):
     
     def cb_custom(self, action, parameters):
         '''
-        This callback function handles custom requests send to the z-wave plugin.
+        This callback function handles custom requests send to the z-wave 
+        plugin.
         @param action: the custom request to handle
         @param parameters: the parameters send with the custom request
         '''
@@ -173,7 +308,7 @@ class ZwaveWrapper(object):
             return d
         
         if action == 'get_nodevalues': 
-            values = {}
+            values = []
             
             node = int(parameters["node"])
             node = self.get_node(self.home_id, node)
@@ -184,29 +319,49 @@ class ZwaveWrapper(object):
                 return d
                 
             for value in node.values:
-                try:               
-                    valueinfo = {"class": value.value_data["commandClass"],
-                                 "label": value.value_data["label"],
-                                 "units": value.value_data["units"],
-                                 "value": value.value_data["value"] }  
-                except:
-                    pass              
                 
-                values[value.value_data["id"]] = valueinfo
+                valueinfo = {'id': value.value_data["id"],
+                             'class': value.value_data["commandClass"],
+                             "label": value.label,
+                             "value": "{0} {1}".format(value.value_data["value"], value.value_data["units"]),
+                             "track": False
+                             }
+                
+                values.append(valueinfo)
 
             d = defer.Deferred()
             d.callback(values)
             return d
+        
+        if action == 'track_value':
+            
+            value_id = parameters['value_id']
+            
+            if value_id not in self.report_values:
+                self.report_values.append(value_id)
+            
+            # save config
+            config = ConfigParser.RawConfigParser()
+            config.read(self.config_file)
+            config.set('openzwave', 'report_values', json.dumps(self.report_values))
+            with open(self.config_file, 'wb') as configfile:
+                config.write(configfile)
+        
+            # Return something anyway, even though we return nothing.
+            d = defer.Deferred()
+            d.callback('')
+            return d        
         
         if action == 'track_values':
             node_id = parameters['node']
             values  = parameters['values']
             
             config = ConfigParser.RawConfigParser()
-            config.read('zwave.conf')
+            config.read(self.config_file)
             
             try:
-                value_list = json.loads(config.get("report_values", str(node_id)))
+                value_list = json.loads(config.get("report_values", 
+                                                   str(node_id)))
             except: 
                 value_list = []
                 
@@ -219,7 +374,7 @@ class ZwaveWrapper(object):
             # update dictionary
             self.report_values = config._sections['report_values']
             
-            with open('zwave.conf', 'wb') as configfile:
+            with open(self.config_file, 'wb') as configfile:
                 config.write(configfile)
             
             # Update specified values right now
@@ -261,10 +416,14 @@ class ZwaveWrapper(object):
         
     def ozw_callback(self, args):
         '''
-        This function handles callbacks from the open-zwave interface.
+        This function handles callbacks from the open-zwave ozw_interface.
         @param args: a callback dict
         '''
         type = args['notificationType']
+        self.log.debug('\n%s\n%s (node %s)\n%s' % ('-' * 30, type, 
+                                                   args['nodeId'], '-' * 30))
+        if type == 'DriverReady':
+            self.cb_driver_ready(args)
         if type == 'NodeAdded':
             self.cb_node_added(args)
         elif type == 'ValueAdded':
@@ -273,10 +432,18 @@ class ZwaveWrapper(object):
             self.cb_value_changed(args)
         elif type in ('AwakeNodesQueried', 'AllNodesQueried'):
             self.cb_all_nodes_queried(args)
+            
+    def cb_driver_ready(self, args):
+        '''
+        Called once OZW has queried capabilities and determined startup values.  
+        HomeID and NodeID of controller are known at this point.
+        '''
+        self.home_id = args['homeId']
                         
     def cb_node_added(self, args):
         '''
-        This callback function is called when a node has been discovered or added. 
+        This callback function is called when a node has been discovered or 
+        added. 
         @param args: a dict containing the relevant callback data.
         '''
         home_id = args['homeId']
@@ -312,7 +479,7 @@ class ZwaveWrapper(object):
         '''
         home_id = args['homeId']
         node_id = args['nodeId']
-        
+                
         try:
             value_id = args['valueId']['id']
         except KeyError:
@@ -324,47 +491,70 @@ class ZwaveWrapper(object):
         value = self.get_node_value(home_id, node_id, value_id)
         if isinstance(value, ZwaveNodeValue):
             value.value_data = args['valueId']
-            if self.report_values.has_key(str(node_id)):          
-                if str(value_id) in self.report_values[str(node_id)]:
-                    report_values = {}
-                    report_values[value.value_data["label"]] = value.value_data["value"]
-                    self.pluginapi.value_update(str(node.node_id), report_values)
+
+            print "LALALALLA"
+            print value_id
+            print self.report_values
+            for report_value in self.report_values:
+                if int(report_value) == value_id:
+                    print "INSIDE IF!!!!!!!!!!!!!!"
+                    values = {}
+                    values[value_id] = value.value_data["value"]
+    
+                    self.pluginapi.value_update(str(node.node_id), values)                
         
     def cb_all_nodes_queried(self, args):
         '''
-        This callback function is called when the open-zwave interface is ready,
-        when all nodes have been queried.
+        This callback function is called when the open-zwave ozw_interface is 
+        ready, when all nodes have been queried.
         We utilize this to query some more node information.
         @param args: a dict containing the relevant callback data.
         '''
+        print "all nodes queried!"
+        
         self.home_id = args['homeId']
         
         for node in self.nodes:
             node.last_update = time.time()
-            node.manufacturer = self.manager.getNodeManufacturerName(node.home_id, node.node_id)
-            node.product = self.manager.getNodeProductName(node.home_id, node.node_id)
-            node.listening = self.manager.isNodeListeningDevice(node.home_id, node.node_id)
-            
-        self.manager.writeConfig(self.home_id)
-        self.pluginapi.ready()
+            node.manufacturer = self.manager.getNodeManufacturerName(node.home_id, 
+                                                                     node.node_id)
+            node.product = self.manager.getNodeProductName(node.home_id, 
+                                                           node.node_id)
+            node.listening = self.manager.isNodeListeningDevice(node.home_id, 
+                                                                node.node_id)
         
+        
+        # Write the latest OZW config to file.
+        self.manager.writeConfig(self.home_id)
+        
+        # Start the refresh timer going.
+        self.poll_timer.start()
+
+        # Notify HouseAgent that we are ready.
+        self.pluginapi.ready()
+                
+
+
+            
 if os.name == 'nt':        
     class ZwaveService(pluginapi.WindowsService):
         '''
-        This class provides a Windows Service interface for the z-wave plugin.
+        This class provides a Windows Service ozw_interface for the z-wave 
+        plugin.
         '''
         _svc_name_ = "hazwave"
         _svc_display_name_ = "HouseAgent - Zwave Service"
         
         def start(self):
             '''
-            Start the Zwave interface.
+            Start the Zwave ozw_interface.
             '''
             ZwaveWrapper()
         
 if __name__ == '__main__':
     if os.name == 'nt':
-        pluginapi.handle_windowsservice(ZwaveService) # We want to start as a Windows service on Windows.
+        # We want to start as a Windows service on Windows.
+        pluginapi.handle_windowsservice(ZwaveService) 
     else:
-        ZwaveWrapper()
+        zwave = ZwaveWrapper()
         reactor.run()

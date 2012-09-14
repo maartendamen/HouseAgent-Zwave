@@ -1,0 +1,108 @@
+<%inherit file="/master.html"/>
+
+<%def name="head()">
+    <link rel="stylesheet" type="text/css" media="screen" href="/css/ui.jqgrid.css" />
+    <script src="/js/grid.locale-en.js" type="text/javascript"></script>
+    <script type="text/javascript" src="/js/jquery.jqGrid.min.js"></script>
+
+    <script language='javascript'>
+        $(document).ready(function() {
+        	
+        	var getColumnIndexByName = function(grid, columnName) {
+		        var cm = grid.jqGrid('getGridParam', 'colModel'), i, l;
+		        for (i = 1, l = cm.length; i < l; i += 1) {
+		            if (cm[i].name === columnName) {
+		                return i; // return the index
+		            }
+		        }
+		        return -1;
+		    };
+                    
+            jQuery("#values").jqGrid({
+                url:'/zwave_values?node=${node}&pluginguid=${pluginguid}',
+                datatype: "json",
+                colNames:['Class', 'Label', 'Value', 'Report to coordinator'],
+                colModel:[
+                    {name:'class',index:'class', width:220,editable:true,editoptions:{size:20}},
+                    {name:'label',index:'label', width:220,editable:true,editoptions:{size:20}},
+                    {name:'value',index:'value', width:220,editable:true,editoptions:{size:20}},
+                    {name:'track',index:'track', sortable:true, width: 70, align: "center", formatter: "checkbox", formatoptions: {disabled : false}, editable: true, edittype:"checkbox"},
+                ],
+                rowNum:100,
+                rowList:[10,20,30],
+                pager: '#pagernav',
+                sortname: 'id',
+                viewrecords: true,
+                sortorder: "desc",
+                caption:"HouseAgent locations",
+                editurl:"locations",
+				autowidth: true,
+				height:"600",
+                jsonReader: {
+                    repeatitems: false,
+                    id: "id",
+                    root: function (obj) { return obj; },
+                    page: function (obj) { return 1; },
+                    total: function (obj) { return 1; },
+                    records: function (obj) { return obj.length; }
+                }, 
+                loadComplete: function () {
+                    var iCol = getColumnIndexByName ($(this), 'track'), rows = this.rows, i, c = rows.length;
+                    for (i = 0; i < c; i += 1) {
+                        $("input", rows[i].cells[iCol]).click(function (e) {
+                            var id = $(e.target).closest('tr')[0].id,
+                                isChecked = $(e.target).is(':checked');
+                            var label = $(e.target).closest('tr').children()[1].title;
+  
+							var dataString = 'value_id=' + id + '&label=' + label + '&deviceid=' + ${deviceid}
+						 	+ '&pluginguid=' + '${pluginguid}';                                  
+                                                     
+                  	        $.ajax({
+					          type: 'POST',
+					          url: '/zwave_track_value',
+					          data: dataString,
+					                success:    function(data) {
+					                	               
+					                                // Show operation was successful
+					                                $("#message").html('<img height="16" width="16" align="left" class="message" src="/images/ok.png">Device \'' + device_name + '\' succesfully added to the database.!');
+					                                $('#message').show('slow', function() {
+					                                });
+					
+					                                // Reset form and clean out checkboxes
+					                                $('#device_add')[0].reset();                           
+					                            }
+					        });                           
+                           
+                        });
+                    }
+                }
+                
+                                           
+            });
+            
+			$("#values").jqGrid('navGrid', '#pagernav',
+			    {edit: true, search: false}, 
+			    { // Edit parameters
+			        mtype: "PUT",
+			        url: "locations",
+			        width: 380,
+			    }, {width: 380},
+			    { // Delete parameters
+			        mtype: "DELETE",
+			        serializeDelData: function () {
+			            return ""; // don't send and body for the HTTP DELETE
+			        },
+			        onclickSubmit: function (params, postdata) {
+			            params.url = '/locations/' + encodeURIComponent(postdata);
+			        }
+			    });
+        });
+
+    </script>
+</%def>
+<%def name="content()">
+<div class="HeadText">HouseAgent locations</div>
+<p>This page allows you to manage HouseAgent locations. Possible locations include: physical locations (offices/houses) or rooms (living room, bathroom) etc.</p>
+<table id="values"></table>
+<div id="pagernav"></div>  
+</%def>

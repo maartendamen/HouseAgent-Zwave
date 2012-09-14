@@ -36,7 +36,13 @@
 							<td>${details['listening']}</td>
 							<td>${details['in_database']}</td>
 							<td>${details['lastupdate']}</td>
-							<td><a href="/zwave_add?node=${node}&pluginguid=${pluginguid}&pluginid=${pluginid}"><img name="Add this device to the database" class="delete" border="0" src="/images/add.png"></a></td>											
+							<td>
+								<a title="Add this device to the database" href="/zwave_add?node=${node}&pluginguid=${pluginguid}&pluginid=${pluginid}"><img class="delete" border="0" src="/images/add.png"></a>
+								
+								% if details['in_database'] == "Yes":
+									<a title="Setup report values" href="/zwave_values_view?node=${node}&pluginguid=${pluginguid}&deviceid=${details['deviceid']}"><img name="Setup report values" class="delete" border="0" src="/images/edit.png"></a>
+								% endif
+							</td>											
 						</tr>
 						% endfor
 					</tbody>
