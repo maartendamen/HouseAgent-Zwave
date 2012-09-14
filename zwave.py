@@ -180,7 +180,7 @@ class ZwaveWrapper(object):
         # ozw_poll_interval seconds.
         self.poll_timer = RepeatTimer(self.ozw_poll_interval, self.refreshNodes)
         
-        self.pluginapi = pluginapi.PluginAPI(self.id, self.PLUGIN_TYPE, broker_host='192.168.1.131',
+        self.pluginapi = pluginapi.PluginAPI(self.id, self.PLUGIN_TYPE, self.broker_host, self.broker_port, 
                                              **callbacks)
         
         print self.pluginapi
