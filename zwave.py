@@ -171,8 +171,8 @@ class ZwaveWrapper(object):
         self.manager.addWatcher(self.ozw_callback)
         self.manager.addDriver(self.ozw_interface)
         
-        callbacks = {'poweron': self.cb_poweron,
-                     'poweroff': self.cb_poweroff,
+        callbacks = {'poweron_v2': self.cb_poweron,
+                     'poweroff_v2': self.cb_poweroff,
                      'custom': self.cb_custom,
                      'thermostat_setpoint': self.cb_thermostat}
         
@@ -232,7 +232,7 @@ class ZwaveWrapper(object):
       
         self.report_values = report_values
                 
-    def cb_poweron(self, node_id):
+    def cb_poweron(self, node_id, value_id):
         '''
         This function is called when a poweron request has been received from 
         the network.
@@ -240,7 +240,7 @@ class ZwaveWrapper(object):
         '''
         node_id = int(node_id)
         d = defer.Deferred()
-        self.manager.setNodeOn(self.home_id, node_id)
+        self.manager.setValue(long(value_id), True)
         d.callback('done!')
         
         # Need to ensure that we get an up to date status of this node.
@@ -249,7 +249,7 @@ class ZwaveWrapper(object):
 
         return d
         
-    def cb_poweroff(self, node_id):
+    def cb_poweroff(self, node_id, value_id):
         '''
         This function is called when a poweroff request has been received from 
         the network.
@@ -257,7 +257,7 @@ class ZwaveWrapper(object):
         '''
         node_id = int(node_id)
         d = defer.Deferred()
-        self.manager.setNodeOff(self.home_id, node_id)
+        self.manager.setValue(long(value_id), False)
         d.callback('done!')
 
         # Need to ensure that we get an up to date status of this node.
@@ -320,7 +320,7 @@ class ZwaveWrapper(object):
                 
             for value in node.values:
                 
-                valueinfo = {'id': value.value_data["id"],
+                valueinfo = {'id': str(value.value_data["id"]),
                              'class': value.value_data["commandClass"],
                              "label": value.label,
                              "value": "{0} {1}".format(value.value_data["value"], value.value_data["units"]),
