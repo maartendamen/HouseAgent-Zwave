@@ -55,21 +55,13 @@
                             var label = $(e.target).closest('tr').children()[1].title;
   
 							var dataString = 'value_id=' + id + '&label=' + label + '&deviceid=' + ${deviceid}
-						 	+ '&pluginguid=' + '${pluginguid}';                                  
+						 	+ '&pluginguid=' + '${pluginguid}' + '&delete=' + !isChecked;                                  
                                                      
                   	        $.ajax({
 					          type: 'POST',
 					          url: '/zwave_track_value',
 					          data: dataString,
-					                success:    function(data) {
-					                	               
-					                                // Show operation was successful
-					                                $("#message").html('<img height="16" width="16" align="left" class="message" src="/images/ok.png">Device \'' + device_name + '\' succesfully added to the database.!');
-					                                $('#message').show('slow', function() {
-					                                });
-					
-					                                // Reset form and clean out checkboxes
-					                                $('#device_add')[0].reset();                           
+					                success:    function(data) {                   
 					                            }
 					        });                           
                            
@@ -101,8 +93,8 @@
     </script>
 </%def>
 <%def name="content()">
-<div class="HeadText">HouseAgent locations</div>
-<p>This page allows you to manage HouseAgent locations. Possible locations include: physical locations (offices/houses) or rooms (living room, bathroom) etc.</p>
+<div class="HeadText">Z-wave value management</div>
+<p>Please select any values that you would like to report. These values will then be automatically updated and tracked in the values overview.</p>
 <table id="values"></table>
 <div id="pagernav"></div>  
 </%def>

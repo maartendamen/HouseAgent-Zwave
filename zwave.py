@@ -118,7 +118,8 @@ class ZwaveNode(object):
     def __str__(self):
         return 'home_id: [{0}]  node_id: [{1}]  manufacturer: [{2}] product: [{3}]'.format(self.home_id, 
                                                                                            self.node_id, 
-                                                                                           self.manufacturer,                                                                                  self.product)
+                                                                                           self.manufacturer,
+                                                                                           self.product)
                
 class ZwaveNodeValue(object):
     '''
@@ -171,8 +172,8 @@ class ZwaveWrapper(object):
         self.manager.addWatcher(self.ozw_callback)
         self.manager.addDriver(self.ozw_interface)
         
-        callbacks = {'poweron_v2': self.cb_poweron,
-                     'poweroff_v2': self.cb_poweroff,
+        callbacks = {'poweron': self.cb_poweron,
+                     'poweroff': self.cb_poweroff,
                      'custom': self.cb_custom,
                      'thermostat_setpoint': self.cb_thermostat}
         
@@ -182,8 +183,6 @@ class ZwaveWrapper(object):
         
         self.pluginapi = pluginapi.PluginAPI(self.id, self.PLUGIN_TYPE, self.broker_host, self.broker_port, 
                                              **callbacks)
-        
-        print self.pluginapi
         
     def refreshNodes(self):
         self.log.debug("refresing nodes")
@@ -334,12 +333,17 @@ class ZwaveWrapper(object):
             return d
         
         if action == 'track_value':
-            
+
             value_id = parameters['value_id']
-            
-            if value_id not in self.report_values:
-                self.report_values.append(value_id)
-            
+                        
+            if parameters.has_key("delete"):
+                if value_id in self.report_values:
+                    self.report_values.remove(value_id)
+            else:
+                
+                if value_id not in self.report_values:
+                    self.report_values.append(value_id)
+                
             # save config
             config = ConfigParser.RawConfigParser()
             config.read(self.config_file)
@@ -492,12 +496,8 @@ class ZwaveWrapper(object):
         if isinstance(value, ZwaveNodeValue):
             value.value_data = args['valueId']
 
-            print "LALALALLA"
-            print value_id
-            print self.report_values
             for report_value in self.report_values:
                 if int(report_value) == value_id:
-                    print "INSIDE IF!!!!!!!!!!!!!!"
                     values = {}
                     values[value_id] = value.value_data["value"]
     
@@ -510,7 +510,6 @@ class ZwaveWrapper(object):
         We utilize this to query some more node information.
         @param args: a dict containing the relevant callback data.
         '''
-        print "all nodes queried!"
         
         self.home_id = args['homeId']
         

@@ -10,7 +10,7 @@ def init_pages(web, coordinator, db):
     web.putChild("zwave_add", Zwave_add(coordinator, db))
     web.putChild("zwave_networkinfo", Zwave_networkinfo(coordinator, db))
     web.putChild("zwave_added", Zwave_added(coordinator, db))
-    web.putChild("zwave_values", Zwave_values(coordinator))
+    web.putChild("zwave_values", Zwave_values(coordinator, db))
     web.putChild('zwave_values_view', Zwave_values_view())
     web.putChild('zwave_track_value', Zwave_track_value(coordinator, db))
 
@@ -47,13 +47,21 @@ class Zwave_add(Resource):
     
 class Zwave_values(Resource):
     
-    def __init__(self, coordinator):
+    def __init__(self, coordinator, db):
         Resource.__init__(self)
         self.coordinator = coordinator
+        self.db = db
         
     def result(self, result):
         
-        self.request.write(json.dumps(result))
+        for value in result[0]:
+            print value
+            for val in result[1]:
+                if val[0] == value["id"]:
+                    print "tracked"
+                    value["track"] = True
+                           
+        self.request.write(json.dumps(result[0]))
         self.request.finish()
         
     def render_GET(self, request):
@@ -62,7 +70,12 @@ class Zwave_values(Resource):
         self.node = request.args["node"][0]
         self.pluginguid = request.args["pluginguid"][0]
         
-        self.coordinator.send_custom(self.pluginguid, "get_nodevalues", {'node': self.node}).addCallback(self.result)
+        deferlist = []
+        deferlist.append(self.coordinator.send_custom(self.pluginguid, "get_nodevalues", {'node': self.node}))
+        deferlist.append(self.db.query_values())
+        
+        d = defer.gatherResults(deferlist)
+        d.addCallback(self.result)
         
         return NOT_DONE_YET
     
@@ -89,14 +102,27 @@ class Zwave_track_value(Resource):
         self.request.finish()
     
     def render_POST(self, request):
+        self.request = request
+        
         self.pluginguid = request.args["pluginguid"][0]
         self.value_id = request.args['value_id'][0]
         self.label = request.args["label"][0]
         self.deviceid = request.args["deviceid"][0]
+        delete = request.args["delete"][0]
         
         deferlist = []
-        deferlist.append(self.coordinator.send_custom(self.pluginguid, "track_value", { 'value_id': self.value_id }))
-        deferlist.append(self.db.add_value_with_label(self.value_id, self.label, self.deviceid))
+        
+        print delete
+        
+        if delete == "true":
+            deferlist.append(self.coordinator.send_custom(self.pluginguid, "track_value", { 'value_id': self.value_id, 'delete': True }))
+            deferlist.append(self.db.del_value_by_name_and_device_id(self.value_id, self.deviceid))
+        else: 
+            deferlist.append(self.coordinator.send_custom(self.pluginguid, "track_value", { 'value_id': self.value_id }))
+            deferlist.append(self.db.add_value_with_label(self.value_id, self.label, self.deviceid))
+            
+        d = defer.gatherResults(deferlist)
+        d.addCallback(self.result)
         
         return NOT_DONE_YET
     
